@@ -39,23 +39,24 @@ _SEPARATOR = """
 
 _FUNC_TEMPLATE = """
 {section} {func_type} `{header}`
-{source}
 
 ```python
 {funcdef}
 ```
 
 {doc}
+
+{source}
 """
 
 _CLASS_TEMPLATE = """
 {section} {kind} `{header}`
-{source}
 {doc}
 {init}
 {variables}
 {handlers}
 {methods}
+{source}
 """
 
 _VARIABLES_TEMPLATE = """
@@ -65,11 +66,11 @@ _VARIABLES_TEMPLATE = """
 
 _MODULE_TEMPLATE = """
 {section} module `{header}`
-{source}
 {doc}
 {global_vars}
 {functions}
 {classes}
+{source}
 """
 
 _OVERVIEW_TEMPLATE = """
@@ -100,10 +101,7 @@ nav:
 
 
 def _to_source_link(path: str) -> str:
-    filename = path.rsplit("/", 1)[-1]
-    filename = ":".join(filename.rsplit("#L", 1))
-    return "\n**Source:** [`%s`](%s)\n" % (filename, path)
-
+    return "\n[Link to source code](%s)\n" % (path)
 
 def _get_function_signature(
     function: Callable,
