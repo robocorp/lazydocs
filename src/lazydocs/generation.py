@@ -10,12 +10,20 @@ import re
 import subprocess
 import sys
 import types
+from collections import defaultdict
 from enum import Enum
 from pathlib import Path
 from pydoc import locate
 from typing import Any, Callable, Dict, List, Optional
 
 import mdformat
+
+
+class ClassTypes:
+    CLASS = "class"
+    ENUM = "enum"
+    EXCEPTION = "exception"
+
 
 _RE_BLOCKSTART_LIST = re.compile(
     r"(Args:|Arg:|Arguments:|Parameters:|Kwargs:|Attributes:|Returns:|Yields:|Kwargs:|Raises:).{0,2}$",
@@ -39,14 +47,34 @@ _SEPARATOR = """
 ---
 """
 
+_FUNCTIONS_TEMPLATE = """
+{section} Functions
+{functions}
+"""
+
 _FUNC_TEMPLATE = """
-{section} {func_type} `{header}` {source}
+{section} `{header}` {source}
 
 {doc}
 """
 
+_CLASSES_TEMPLATE = """
+{section} Classes
+{classes}
+"""
+
+_EXCEPTIONS_TEMPLATE = """
+{section} Exceptions
+{classes}
+"""
+
+_ENUMS_TEMPLATE = """
+{section} Enums
+{classes}
+"""
+
 _CLASS_TEMPLATE = """
-{section} {kind} `{header}` {source}
+{section} `{header}` {source}
 {doc}
 {init}
 {variables}
@@ -65,6 +93,8 @@ _MODULE_TEMPLATE = """
 {global_vars}
 {functions}
 {classes}
+{exceptions}
+{enums}
 """
 
 _OVERVIEW_TEMPLATE = """
@@ -462,6 +492,16 @@ class MarkdownGenerator(object):
 
         self.generated_objects: List[Dict] = []
 
+    def _get_class_type(self, cls: Any) -> str:
+        if issubclass(cls, Enum):
+            kind = ClassTypes.ENUM
+        elif issubclass(cls, Exception):
+            kind = ClassTypes.EXCEPTION
+        else:
+            kind = ClassTypes.CLASS
+
+        return kind
+
     def _get_src_path(self, obj: Any, append_base: bool = True) -> str:
         """Creates a src path string with line info for use as markdown link.
 
@@ -646,17 +686,14 @@ class MarkdownGenerator(object):
             init = ""
 
         variables = []
+        properties = []
 
         # Handle different kinds of classes
-        if issubclass(cls, Enum):
-            kind = "enum"
+        kind = self._get_class_type(cls)
+        if kind == ClassTypes.ENUM:
             sectionheader = "#" * (depth + 1)
             values = "\n".join("- **%s** = %s" % (obj.name, obj.value) for obj in cls)
             variables.append("%s Values\n%s" % (sectionheader, values))
-        elif issubclass(cls, Exception):
-            kind = "exception"
-        else:
-            kind = "class"
 
         for name, obj in inspect.getmembers(
             cls, lambda a: not (inspect.isroutine(a) or inspect.ismethod(a))
@@ -667,9 +704,9 @@ class MarkdownGenerator(object):
                 property_name = f"{clsname}.{name}"
                 if self.remove_package_prefix:
                     property_name = name
-                variables.append(
-                    "\n%s property `%s`%s\n" % (subsection, property_name, comments)
-                )
+                properties.append("- `%s`%s\n" % (property_name, comments))
+        if properties:
+            variables.append("%s Properties\n%s" % (subsection, "\n".join(properties)))
 
         handlers = []
         for name, obj in inspect.getmembers(cls, inspect.ismethoddescriptor):
@@ -749,8 +786,7 @@ class MarkdownGenerator(object):
             }
         )
 
-        classes: List[str] = []
-        index: List[int] = []
+        classes: Dict[str, list] = defaultdict(list)
         for name, obj in inspect.getmembers(module, inspect.isclass):
             found.append(name)
             if name.startswith("_"):
@@ -764,15 +800,37 @@ class MarkdownGenerator(object):
             ):
                 continue
 
-            class_markdown = self.class2md(obj, depth=depth + 1)
+            class_markdown = self.class2md(obj, depth=depth + 2)
             if class_markdown:
-                classes.append(_SEPARATOR + class_markdown)
-                if exported is None:
-                    index.append(_get_line_no(obj) or 0)
-                else:
-                    index.append(exported.index(name))
+                kind = self._get_class_type(obj)
+                classes[kind].append(_SEPARATOR + class_markdown)
 
-        classes = _order_by_index(classes, index)
+        classes_md = (
+            _CLASSES_TEMPLATE.format(
+                section="#" * (depth + 1),
+                classes="".join([c for c in classes[ClassTypes.CLASS]]),
+            )
+            if classes[ClassTypes.CLASS]
+            else ""
+        )
+
+        exceptions_md = (
+            _EXCEPTIONS_TEMPLATE.format(
+                section="#" * (depth + 1),
+                classes="".join([c for c in classes[ClassTypes.EXCEPTION]]),
+            )
+            if classes[ClassTypes.EXCEPTION]
+            else ""
+        )
+
+        enums_md = (
+            _ENUMS_TEMPLATE.format(
+                section="#" * (depth + 1),
+                classes="".join([c for c in classes[ClassTypes.ENUM]]),
+            )
+            if classes[ClassTypes.ENUM]
+            else ""
+        )
 
         functions: List[str] = []
         index = []
@@ -789,7 +847,7 @@ class MarkdownGenerator(object):
             ):
                 continue
 
-            function_md = self.func2md(obj, depth=depth + 1)
+            function_md = self.func2md(obj, depth=depth + 2)
             if function_md:
                 functions.append(_SEPARATOR + function_md)
                 if exported is None:
@@ -798,6 +856,9 @@ class MarkdownGenerator(object):
                     index.append(exported.index(name))
 
         functions = _order_by_index(functions, index)
+        functions_md = _FUNCTIONS_TEMPLATE.format(
+            section="#" * (depth + 1), functions="\n".join(functions)
+        )
 
         variables: List[str] = []
         index = []
@@ -835,8 +896,10 @@ class MarkdownGenerator(object):
             source=_SOURCE_BADGE_TEMPLATE.format(path=path) if path else "",
             doc=doc,
             global_vars=variables_section,
-            functions="\n".join(functions) if functions else "",
-            classes="".join(classes) if classes else "",
+            functions=functions_md if functions_md else "",
+            classes=classes_md if classes_md else "",
+            exceptions=exceptions_md,
+            enums=enums_md,
         )
 
         return markdown
