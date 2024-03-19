@@ -35,7 +35,7 @@ _RE_BLOCKSTART_TEXT = re.compile(r"(Examples:|Example:|Todo:).{0,2}$", re.IGNORE
 _RE_QUOTE_TEXT = re.compile(r"(Notes:|Note:).{0,2}$", re.IGNORECASE)
 
 _RE_TYPED_ARGSTART = re.compile(r"([\w\[\]_]{1,}?)\s*?\((.*?)\):(.{2,})", re.IGNORECASE)
-_RE_ARGSTART = re.compile(r"(.{1,}?):(.{2,})", re.IGNORECASE)
+_RE_ARGSTART = re.compile(r"(\**[\w\[\]_]{1,}?)\s*?:(.{2,})?", re.IGNORECASE)
 
 _IGNORE_GENERATION_INSTRUCTION = "lazydocs: ignore"
 
@@ -49,6 +49,11 @@ _SEPARATOR = """
 
 _FUNCTIONS_TEMPLATE = """
 {section} Functions
+{functions}
+"""
+
+_METHODS_TEMPLATE = """
+{section} Methods
 {functions}
 """
 
@@ -653,7 +658,7 @@ class MarkdownGenerator(object):
             return ""
 
         section = "#" * depth
-        subsection = "#" * (depth + 2)
+        subsection = "#" * (depth + 1)
         clsname = cls.__name__
         modname = cls.__module__
         header = clsname
@@ -736,9 +741,18 @@ class MarkdownGenerator(object):
                 # object module should be the same as the calling module
                 and obj.__module__ == modname
             ):
-                function_md = self.func2md(obj, clsname=clsname, depth=depth + 1)
+                function_md = self.func2md(obj, clsname=clsname, depth=depth + 2)
                 if function_md:
                     methods.append(_SEPARATOR + function_md)
+
+        methods_md = (
+            _METHODS_TEMPLATE.format(
+                section="#" * (depth + 1),
+                functions="".join(methods),
+            )
+            if methods
+            else ""
+        )
 
         markdown = _CLASS_TEMPLATE.format(
             kind=kind,
@@ -749,7 +763,7 @@ class MarkdownGenerator(object):
             init=init,
             variables="".join(variables),
             handlers="".join(handlers),
-            methods="".join(methods),
+            methods=methods_md,
         )
 
         return markdown
@@ -800,14 +814,14 @@ class MarkdownGenerator(object):
             ):
                 continue
 
-            class_markdown = self.class2md(obj, depth=depth + 2)
+            class_markdown = self.class2md(obj, depth=depth + 1)
             if class_markdown:
                 kind = self._get_class_type(obj)
                 classes[kind].append(_SEPARATOR + class_markdown)
 
         classes_md = (
             _CLASSES_TEMPLATE.format(
-                section="#" * (depth + 1),
+                section="#" * depth,
                 classes="".join([c for c in classes[ClassTypes.CLASS]]),
             )
             if classes[ClassTypes.CLASS]
@@ -816,7 +830,7 @@ class MarkdownGenerator(object):
 
         exceptions_md = (
             _EXCEPTIONS_TEMPLATE.format(
-                section="#" * (depth + 1),
+                section="#" * depth,
                 classes="".join([c for c in classes[ClassTypes.EXCEPTION]]),
             )
             if classes[ClassTypes.EXCEPTION]
@@ -825,7 +839,7 @@ class MarkdownGenerator(object):
 
         enums_md = (
             _ENUMS_TEMPLATE.format(
-                section="#" * (depth + 1),
+                section="#" * depth,
                 classes="".join([c for c in classes[ClassTypes.ENUM]]),
             )
             if classes[ClassTypes.ENUM]
@@ -847,7 +861,7 @@ class MarkdownGenerator(object):
             ):
                 continue
 
-            function_md = self.func2md(obj, depth=depth + 2)
+            function_md = self.func2md(obj, depth=depth + 1)
             if function_md:
                 functions.append(_SEPARATOR + function_md)
                 if exported is None:
@@ -857,7 +871,7 @@ class MarkdownGenerator(object):
 
         functions = _order_by_index(functions, index)
         functions_md = _FUNCTIONS_TEMPLATE.format(
-            section="#" * (depth + 1), functions="\n".join(functions)
+            section="#" * depth, functions="\n".join(functions)
         )
 
         variables: List[str] = []
@@ -886,7 +900,7 @@ class MarkdownGenerator(object):
         variables = _order_by_index(variables, index)
         if variables:
             variables_section = _VARIABLES_TEMPLATE.format(
-                section="#" * (depth + 1),
+                section="#" * depth,
                 variables="\n".join(variables),
             )
 
