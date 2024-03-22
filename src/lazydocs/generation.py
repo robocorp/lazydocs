@@ -39,8 +39,6 @@ _RE_ARGSTART = re.compile(r"(\**[\w\[\]_]{1,}?)\s*?:(.{2,})?", re.IGNORECASE)
 
 _IGNORE_GENERATION_INSTRUCTION = "lazydocs: ignore"
 
-_SOURCE_BADGE_TEMPLATE = '<a href="{path}"><img align="right" src="https://img.shields.io/badge/-source-cccccc?style=flat-square" /></a>'
-
 # String templates
 
 _SEPARATOR = """
@@ -58,14 +56,13 @@ _METHODS_TEMPLATE = """
 """
 
 _FUNC_TEMPLATE = """
-{section} `{header}` {source}
+{section} `{header}`
 
 {doc}
-"""
-
-_CLASSES_TEMPLATE = """
-{section} Classes
-{classes}
+{source}
+```python
+{funcdef}
+```
 """
 
 _EXCEPTIONS_TEMPLATE = """
@@ -79,7 +76,7 @@ _ENUMS_TEMPLATE = """
 """
 
 _CLASS_TEMPLATE = """
-{section} `{header}` {source}
+{section} {kind} `{header}`
 {doc}
 {init}
 {variables}
@@ -93,7 +90,7 @@ _VARIABLES_TEMPLATE = """
 """
 
 _MODULE_TEMPLATE = """
-{section} module `{header}` {source}
+{section} module `{header}`
 {doc}
 {global_vars}
 {functions}
@@ -130,9 +127,7 @@ nav:
 
 
 def _to_source_link(path: str) -> str:
-    filename = path.rsplit("/", 1)[-1]
-    filename = ":".join(filename.rsplit("#L", 1))
-    return "\n**Source:** [`%s`](%s)\n" % (filename, path)
+    return "\n [**Link to source**](%s)\n" % path
 
 
 def _get_function_signature(
@@ -635,7 +630,7 @@ class MarkdownGenerator(object):
         markdown = _FUNC_TEMPLATE.format(
             section=section,
             header=header,
-            source=_SOURCE_BADGE_TEMPLATE.format(path=path) if path else "",
+            source=_to_source_link(path) if path else "",
             funcdef=funcdef,
             func_type=func_type,
             doc=doc if doc else "*No documentation found.*",
@@ -643,12 +638,12 @@ class MarkdownGenerator(object):
 
         return markdown
 
-    def class2md(self, cls: Any, depth: int = 2) -> str:
+    def class2md(self, cls: Any, depth: int = 1) -> str:
         """Takes a class and creates markdown text to document its methods and variables.
 
         Args:
             cls (class): Selected class for markdown generation.
-            depth (int, optional): Number of # to append to function name. Defaults to 2.
+            depth (int, optional): Number of # to append to function name. Defaults to 1.
 
         Returns:
             str: Markdown documentation for selected class.
@@ -755,10 +750,10 @@ class MarkdownGenerator(object):
         )
 
         markdown = _CLASS_TEMPLATE.format(
-            kind=kind,
+            kind=ClassTypes.CLASS.capitalize() if kind == ClassTypes.CLASS else "",
             section=section,
             header=header,
-            source=_SOURCE_BADGE_TEMPLATE.format(path=path) if path else "",
+            source=_to_source_link(path) if path else "",
             doc=doc if doc else "",
             init=init,
             variables="".join(variables),
@@ -814,19 +809,12 @@ class MarkdownGenerator(object):
             ):
                 continue
 
-            class_markdown = self.class2md(obj, depth=depth + 1)
-            if class_markdown:
-                kind = self._get_class_type(obj)
-                classes[kind].append(_SEPARATOR + class_markdown)
-
-        classes_md = (
-            _CLASSES_TEMPLATE.format(
-                section="#" * depth,
-                classes="".join([c for c in classes[ClassTypes.CLASS]]),
+            kind = self._get_class_type(obj)
+            class_markdown = self.class2md(
+                obj, depth=depth if kind == ClassTypes.CLASS else depth + 1
             )
-            if classes[ClassTypes.CLASS]
-            else ""
-        )
+            if class_markdown:
+                classes[kind].append(_SEPARATOR + class_markdown)
 
         exceptions_md = (
             _EXCEPTIONS_TEMPLATE.format(
@@ -907,11 +895,11 @@ class MarkdownGenerator(object):
         markdown = _MODULE_TEMPLATE.format(
             section="#" * depth,
             header=modname,
-            source=_SOURCE_BADGE_TEMPLATE.format(path=path) if path else "",
+            source=_to_source_link(path) if path else "",
             doc=doc,
             global_vars=variables_section,
             functions=functions_md if functions_md else "",
-            classes=classes_md if classes_md else "",
+            classes="".join([c for c in classes[ClassTypes.CLASS]]),
             exceptions=exceptions_md,
             enums=enums_md,
         )
@@ -1053,13 +1041,18 @@ def generate_docs(
         src_base_url=src_base_url,
         remove_package_prefix=remove_package_prefix,
     )
-
-    pydocstyle_cmd = "pydocstyle --convention=google --add-ignore=D100,D101,D102,D103,D104,D105,D107,D202"
+    pydocstyle_cmd = 'pydocstyle --match="^(?!_(?!_))(?!test_).*\.py" --convention=google --add-ignore=D100,D101,D102,D103,D104,D105,D107,D202'
 
     for path in paths:  # lgtm [py/non-iterable-in-for-loop]
         if os.path.isdir(path):
-            if validate and subprocess.call(f"{pydocstyle_cmd} {path}", shell=True) > 0:
-                raise Exception(f"Validation for {path} failed.")
+            print(path)
+            if validate:
+                call_return = subprocess.call(f"{pydocstyle_cmd} {path}", shell=True)
+                if call_return > 0:
+                    raise Exception(f"Validation for {path} failed.")
+                else:
+                    print(f"Validation for {path} passed.")
+                    continue
 
             if not stdout_mode:
                 print(f"Generating docs for python package at: {path}")
@@ -1096,8 +1089,14 @@ def generate_docs(
                         f"Failed to generate docs for module {module_name}: " + repr(ex)
                     )
         elif os.path.isfile(path):
-            if validate and subprocess.call(f"{pydocstyle_cmd} {path}", shell=True) > 0:
-                raise Exception(f"Validation for {path} failed.")
+            print(path)
+            if validate:
+                call_return = subprocess.call(f"{pydocstyle_cmd} {path}", shell=True)
+                if call_return > 0:
+                    raise Exception(f"Validation for {path} failed.")
+                else:
+                    print(f"Validation for {path} passed.")
+                    continue
 
             if not stdout_mode:
                 print(f"Generating docs for python module at: {path}")
@@ -1192,6 +1191,9 @@ def generate_docs(
                         )
             else:
                 raise Exception(f"Failed to generate markdown for {path}.")
+
+    if validate:
+        return
 
     if overview_file and not stdout_mode:
         if not overview_file.endswith(".md"):
