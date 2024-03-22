@@ -10,12 +10,20 @@ import re
 import subprocess
 import sys
 import types
+from collections import defaultdict
 from enum import Enum
 from pathlib import Path
 from pydoc import locate
 from typing import Any, Callable, Dict, List, Optional
 
 import mdformat
+
+
+class ClassTypes:
+    CLASS = "class"
+    ENUM = "enum"
+    EXCEPTION = "exception"
+
 
 _RE_BLOCKSTART_LIST = re.compile(
     r"(Args:|Arg:|Arguments:|Parameters:|Kwargs:|Attributes:|Returns:|Yields:|Kwargs:|Raises:).{0,2}$",
@@ -27,7 +35,7 @@ _RE_BLOCKSTART_TEXT = re.compile(r"(Examples:|Example:|Todo:).{0,2}$", re.IGNORE
 _RE_QUOTE_TEXT = re.compile(r"(Notes:|Note:).{0,2}$", re.IGNORECASE)
 
 _RE_TYPED_ARGSTART = re.compile(r"([\w\[\]_]{1,}?)\s*?\((.*?)\):(.{2,})", re.IGNORECASE)
-_RE_ARGSTART = re.compile(r"(.{1,}?):(.{2,})", re.IGNORECASE)
+_RE_ARGSTART = re.compile(r"(\**[\w\[\]_]{1,}?)\s*?:(.{2,})?", re.IGNORECASE)
 
 _IGNORE_GENERATION_INSTRUCTION = "lazydocs: ignore"
 
@@ -37,20 +45,38 @@ _SEPARATOR = """
 ---
 """
 
-_FUNC_TEMPLATE = """
-{section} {func_type} `{header}`
-{source}
+_FUNCTIONS_TEMPLATE = """
+{section} Functions
+{functions}
+"""
 
+_METHODS_TEMPLATE = """
+{section} Methods
+{functions}
+"""
+
+_FUNC_TEMPLATE = """
+{section} `{header}`
+
+{doc}
+{source}
 ```python
 {funcdef}
 ```
+"""
 
-{doc}
+_EXCEPTIONS_TEMPLATE = """
+{section} Exceptions
+{classes}
+"""
+
+_ENUMS_TEMPLATE = """
+{section} Enums
+{classes}
 """
 
 _CLASS_TEMPLATE = """
 {section} {kind} `{header}`
-{source}
 {doc}
 {init}
 {variables}
@@ -65,11 +91,12 @@ _VARIABLES_TEMPLATE = """
 
 _MODULE_TEMPLATE = """
 {section} module `{header}`
-{source}
 {doc}
 {global_vars}
 {functions}
 {classes}
+{exceptions}
+{enums}
 """
 
 _OVERVIEW_TEMPLATE = """
@@ -100,9 +127,7 @@ nav:
 
 
 def _to_source_link(path: str) -> str:
-    filename = path.rsplit("/", 1)[-1]
-    filename = ":".join(filename.rsplit("#L", 1))
-    return "\n**Source:** [`%s`](%s)\n" % (filename, path)
+    return "\n [**Link to source**](%s)\n" % path
 
 
 def _get_function_signature(
@@ -467,6 +492,16 @@ class MarkdownGenerator(object):
 
         self.generated_objects: List[Dict] = []
 
+    def _get_class_type(self, cls: Any) -> str:
+        if issubclass(cls, Enum):
+            kind = ClassTypes.ENUM
+        elif issubclass(cls, Exception):
+            kind = ClassTypes.EXCEPTION
+        else:
+            kind = ClassTypes.CLASS
+
+        return kind
+
     def _get_src_path(self, obj: Any, append_base: bool = True) -> str:
         """Creates a src path string with line info for use as markdown link.
 
@@ -603,12 +638,12 @@ class MarkdownGenerator(object):
 
         return markdown
 
-    def class2md(self, cls: Any, depth: int = 2) -> str:
+    def class2md(self, cls: Any, depth: int = 1) -> str:
         """Takes a class and creates markdown text to document its methods and variables.
 
         Args:
             cls (class): Selected class for markdown generation.
-            depth (int, optional): Number of # to append to function name. Defaults to 2.
+            depth (int, optional): Number of # to append to function name. Defaults to 1.
 
         Returns:
             str: Markdown documentation for selected class.
@@ -618,7 +653,7 @@ class MarkdownGenerator(object):
             return ""
 
         section = "#" * depth
-        subsection = "#" * (depth + 2)
+        subsection = "#" * (depth + 1)
         clsname = cls.__name__
         modname = cls.__module__
         header = clsname
@@ -651,17 +686,14 @@ class MarkdownGenerator(object):
             init = ""
 
         variables = []
+        properties = []
 
         # Handle different kinds of classes
-        if issubclass(cls, Enum):
-            kind = "enum"
+        kind = self._get_class_type(cls)
+        if kind == ClassTypes.ENUM:
             sectionheader = "#" * (depth + 1)
             values = "\n".join("- **%s** = %s" % (obj.name, obj.value) for obj in cls)
             variables.append("%s Values\n%s" % (sectionheader, values))
-        elif issubclass(cls, Exception):
-            kind = "exception"
-        else:
-            kind = "class"
 
         for name, obj in inspect.getmembers(
             cls, lambda a: not (inspect.isroutine(a) or inspect.ismethod(a))
@@ -672,9 +704,9 @@ class MarkdownGenerator(object):
                 property_name = f"{clsname}.{name}"
                 if self.remove_package_prefix:
                     property_name = name
-                variables.append(
-                    "\n%s property `%s`%s\n" % (subsection, property_name, comments)
-                )
+                properties.append("- `%s`%s\n" % (property_name, comments))
+        if properties:
+            variables.append("%s Properties\n%s" % (subsection, "\n".join(properties)))
 
         handlers = []
         for name, obj in inspect.getmembers(cls, inspect.ismethoddescriptor):
@@ -704,12 +736,21 @@ class MarkdownGenerator(object):
                 # object module should be the same as the calling module
                 and obj.__module__ == modname
             ):
-                function_md = self.func2md(obj, clsname=clsname, depth=depth + 1)
+                function_md = self.func2md(obj, clsname=clsname, depth=depth + 2)
                 if function_md:
                     methods.append(_SEPARATOR + function_md)
 
+        methods_md = (
+            _METHODS_TEMPLATE.format(
+                section="#" * (depth + 1),
+                functions="".join(methods),
+            )
+            if methods
+            else ""
+        )
+
         markdown = _CLASS_TEMPLATE.format(
-            kind=kind,
+            kind=ClassTypes.CLASS.capitalize() if kind == ClassTypes.CLASS else "",
             section=section,
             header=header,
             source=_to_source_link(path) if path else "",
@@ -717,7 +758,7 @@ class MarkdownGenerator(object):
             init=init,
             variables="".join(variables),
             handlers="".join(handlers),
-            methods="".join(methods),
+            methods=methods_md,
         )
 
         return markdown
@@ -754,8 +795,7 @@ class MarkdownGenerator(object):
             }
         )
 
-        classes: List[str] = []
-        index: List[int] = []
+        classes: Dict[str, list] = defaultdict(list)
         for name, obj in inspect.getmembers(module, inspect.isclass):
             found.append(name)
             if name.startswith("_"):
@@ -769,15 +809,30 @@ class MarkdownGenerator(object):
             ):
                 continue
 
-            class_markdown = self.class2md(obj, depth=depth + 1)
+            kind = self._get_class_type(obj)
+            class_markdown = self.class2md(
+                obj, depth=depth if kind == ClassTypes.CLASS else depth + 1
+            )
             if class_markdown:
-                classes.append(_SEPARATOR + class_markdown)
-                if exported is None:
-                    index.append(_get_line_no(obj) or 0)
-                else:
-                    index.append(exported.index(name))
+                classes[kind].append(_SEPARATOR + class_markdown)
 
-        classes = _order_by_index(classes, index)
+        exceptions_md = (
+            _EXCEPTIONS_TEMPLATE.format(
+                section="#" * depth,
+                classes="".join([c for c in classes[ClassTypes.EXCEPTION]]),
+            )
+            if classes[ClassTypes.EXCEPTION]
+            else ""
+        )
+
+        enums_md = (
+            _ENUMS_TEMPLATE.format(
+                section="#" * depth,
+                classes="".join([c for c in classes[ClassTypes.ENUM]]),
+            )
+            if classes[ClassTypes.ENUM]
+            else ""
+        )
 
         functions: List[str] = []
         index = []
@@ -803,6 +858,9 @@ class MarkdownGenerator(object):
                     index.append(exported.index(name))
 
         functions = _order_by_index(functions, index)
+        functions_md = _FUNCTIONS_TEMPLATE.format(
+            section="#" * depth, functions="\n".join(functions)
+        )
 
         variables: List[str] = []
         index = []
@@ -830,7 +888,7 @@ class MarkdownGenerator(object):
         variables = _order_by_index(variables, index)
         if variables:
             variables_section = _VARIABLES_TEMPLATE.format(
-                section="#" * (depth + 1),
+                section="#" * depth,
                 variables="\n".join(variables),
             )
 
@@ -840,8 +898,10 @@ class MarkdownGenerator(object):
             source=_to_source_link(path) if path else "",
             doc=doc,
             global_vars=variables_section,
-            functions="\n".join(functions) if functions else "",
-            classes="".join(classes) if classes else "",
+            functions=functions_md if functions_md else "",
+            classes="".join([c for c in classes[ClassTypes.CLASS]]),
+            exceptions=exceptions_md,
+            enums=enums_md,
         )
 
         return markdown
@@ -981,13 +1041,18 @@ def generate_docs(
         src_base_url=src_base_url,
         remove_package_prefix=remove_package_prefix,
     )
-
-    pydocstyle_cmd = "pydocstyle --convention=google --add-ignore=D100,D101,D102,D103,D104,D105,D107,D202"
+    pydocstyle_cmd = 'pydocstyle --match="^(?!_(?!_))(?!test_).*\.py" --convention=google --add-ignore=D100,D101,D102,D103,D104,D105,D107,D202'
 
     for path in paths:  # lgtm [py/non-iterable-in-for-loop]
         if os.path.isdir(path):
-            if validate and subprocess.call(f"{pydocstyle_cmd} {path}", shell=True) > 0:
-                raise Exception(f"Validation for {path} failed.")
+            print(path)
+            if validate:
+                call_return = subprocess.call(f"{pydocstyle_cmd} {path}", shell=True)
+                if call_return > 0:
+                    raise Exception(f"Validation for {path} failed.")
+                else:
+                    print(f"Validation for {path} passed.")
+                    continue
 
             if not stdout_mode:
                 print(f"Generating docs for python package at: {path}")
@@ -1024,8 +1089,14 @@ def generate_docs(
                         f"Failed to generate docs for module {module_name}: " + repr(ex)
                     )
         elif os.path.isfile(path):
-            if validate and subprocess.call(f"{pydocstyle_cmd} {path}", shell=True) > 0:
-                raise Exception(f"Validation for {path} failed.")
+            print(path)
+            if validate:
+                call_return = subprocess.call(f"{pydocstyle_cmd} {path}", shell=True)
+                if call_return > 0:
+                    raise Exception(f"Validation for {path} failed.")
+                else:
+                    print(f"Validation for {path} passed.")
+                    continue
 
             if not stdout_mode:
                 print(f"Generating docs for python module at: {path}")
@@ -1120,6 +1191,9 @@ def generate_docs(
                         )
             else:
                 raise Exception(f"Failed to generate markdown for {path}.")
+
+    if validate:
+        return
 
     if overview_file and not stdout_mode:
         if not overview_file.endswith(".md"):
