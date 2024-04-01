@@ -1123,7 +1123,7 @@ def generate_docs(
                         watermark=watermark,
                     )
             else:
-                raise Exception(f"Failed to generate markdown for {path}")
+                raise Exception(f"Failed to generate markdown for {path!r}.")
         else:
             # Path seems to be an import
             obj = locate(path)
@@ -1190,7 +1190,7 @@ def generate_docs(
                             import_md, path, out_path=output_path, watermark=watermark
                         )
             else:
-                raise Exception(f"Failed to generate markdown for {path}.")
+                raise Exception(f"Failed to generate markdown for {path!r}.")
 
     if validate:
         return
