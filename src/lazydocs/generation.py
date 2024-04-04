@@ -1041,7 +1041,7 @@ def generate_docs(
         src_base_url=src_base_url,
         remove_package_prefix=remove_package_prefix,
     )
-    pydocstyle_cmd = "pydocstyle --convention=google --add-ignore=D100,D101,D102,D103,D104,D105,D107,D202"
+    pydocstyle_cmd = 'pydocstyle --match="^(?!_(?!_))(?!test_).*\.py" --convention=google --add-ignore=D100,D101,D102,D103,D104,D105,D107,D202'
 
     for path in paths:  # lgtm [py/non-iterable-in-for-loop]
         if os.path.isdir(path):
