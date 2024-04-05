@@ -45,7 +45,7 @@ setup(
     package_dir={"": "src"},
     py_modules=[splitext(basename(path))[0] for path in glob("src/*.py")],
     zip_safe=False,
-    install_requires=["typer", "mdformat-gfm"],
+    install_requires=["typer", "mdformat-gfm", "pydocstyle @ git+https://github.com/robocorp/pydocstyle"],
     # deprecated: dependency_links=dependency_links,
     extras_require={
         # extras can be installed via: pip install package[dev]
@@ -59,7 +59,6 @@ setup(
             "pytest-cov",
             "mypy",
             "black",
-            "pydocstyle",
             "isort",
             # lazydocs - do not add, otherwise the generation will not work
         ],
