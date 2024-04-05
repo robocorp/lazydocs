@@ -1044,15 +1044,16 @@ def generate_docs(
     pydocstyle_cmd = 'pydocstyle --match="^(?!_(?!_))(?!test_).*\.py" --convention=google --add-ignore=D100,D101,D102,D103,D104,D105,D107,D202'
 
     for path in paths:  # lgtm [py/non-iterable-in-for-loop]
-        if os.path.isdir(path):
-            if validate:
-                call_return = subprocess.call(f"{pydocstyle_cmd} {path}", shell=True)
-                if call_return > 0:
-                    raise Exception(f"Validation for {path} failed.")
-                else:
-                    print(f"Validation for {path} passed.")
-                    continue
+        if validate:
+            obj_path = path if os.path.isdir(path) or os.path.isdir(path) else locate(path).__file__
+            call_return = subprocess.call(f"{pydocstyle_cmd} {obj_path}", shell=True)
+            if call_return > 0:
+                raise Exception(f"Validation for {path} failed.")
+            else:
+                print(f"Validation for {path} passed.")
+                continue
 
+        if os.path.isdir(path):
             if not stdout_mode:
                 print(f"Generating docs for python package at: {path}")
 
@@ -1088,14 +1089,6 @@ def generate_docs(
                         f"Failed to generate docs for module {module_name}: " + repr(ex)
                     )
         elif os.path.isfile(path):
-            if validate:
-                call_return = subprocess.call(f"{pydocstyle_cmd} {path}", shell=True)
-                if call_return > 0:
-                    raise Exception(f"Validation for {path} failed.")
-                else:
-                    print(f"Validation for {path} passed.")
-                    continue
-
             if not stdout_mode:
                 print(f"Generating docs for python module at: {path}")
 
