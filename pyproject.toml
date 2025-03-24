@@ -3,7 +3,7 @@
 [build-system]
 build-backend = "setuptools.build_meta"
 requires = [
-  "setuptools >= 40.9.0",
+  "setuptools >= 78.0.1",
   "wheel",
 ]
 
@@ -26,4 +26,4 @@ exclude = '''
 )
 '''
 line-length = 88
-target-version = ['py36', 'py37', 'py38']
+target-version = ['py310', 'py311', 'py312']
