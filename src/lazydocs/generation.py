@@ -469,6 +469,14 @@ def _doc2md(obj: Any) -> str:
     return content
 
 
+def get_module(loader, module_name: str) -> Optional[Any]:
+    """Safely load a module using find_spec instead of deprecated find_module."""
+    spec = loader.find_spec(module_name)
+    if spec is None:
+        raise ImportError(f"Cannot find module {module_name}")
+    return spec.loader.load_module(spec.name)
+
+
 class MarkdownGenerator(object):
     """Markdown generator class."""
 
@@ -1067,7 +1075,7 @@ def generate_docs(
                     continue
 
                 try:
-                    mod = loader.find_module(module_name).load_module(module_name)  # type: ignore
+                    mod = get_module(loader, module_name)
                     module_md = generator.module2md(mod)
                     if not module_md:
                         # Module md is empty -> ignore module and all submodules
@@ -1147,9 +1155,7 @@ def generate_docs(
                             continue
 
                         try:
-                            mod = loader.find_module(module_name).load_module(  # type: ignore
-                                module_name
-                            )
+                            mod = get_module(loader, module_name)
                             module_md = generator.module2md(mod)
 
                             if not module_md:
