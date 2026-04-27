@@ -301,7 +301,16 @@ def _get_class_that_defined_method(meth: Any) -> Any:
 
 
 def _get_docstring(obj: Any) -> str:
-    return "" if obj.__doc__ is None else inspect.getdoc(obj) or ""
+    if obj.__doc__ is None:
+        return ""
+    doc = inspect.getdoc(obj) or ""
+    # Python 3.10 returns inherited Enum docstring "An enumeration.";
+    # Python 3.12+ returns None for enums without a custom docstring.
+    # Strip it for consistent output across Python versions.
+    if doc and inspect.isclass(obj) and issubclass(obj, Enum):
+        if doc == "An enumeration.":
+            return ""
+    return doc
 
 
 def _is_object_ignored(obj: Any) -> bool:
@@ -533,6 +542,15 @@ class MarkdownGenerator(object):
             if src_file == "<string>":
                 return ""
 
+            # Decorated functions (e.g., @deprecated from typing_extensions)
+            # may resolve to the decorator's module instead of the actual
+            # source. Try __wrapped__ to get the original function's source.
+            _wrapper_modules = ("typing_extensions", "typing", "functools")
+            if any(mod in src_file for mod in _wrapper_modules):
+                unwrapped = getattr(obj, "__wrapped__", None)
+                if unwrapped is not None:
+                    src_file = inspect.getsourcefile(unwrapped) or src_file
+
             path = os.path.abspath(src_file)
         except Exception:
             return ""
@@ -540,15 +558,7 @@ class MarkdownGenerator(object):
         assert isinstance(path, str)
 
         if src_root_path not in path:
-            # this can happen with e.g.
-            # inlinefunc-wrapped functions
-            if hasattr(obj, "__module__"):
-                path = "%s.%s" % (obj.__module__, obj.__name__)
-            else:
-                path = obj.__name__
-
-            assert isinstance(path, str)
-            path = path.replace(".", "/")
+            return ""
 
         src_path = Path(os.path.abspath(path)).relative_to(src_root_path).as_posix()
         if append_base and self.src_base_url:
